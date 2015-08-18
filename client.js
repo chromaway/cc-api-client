@@ -42,22 +42,22 @@ function APIClient (url) {
 inherits(APIClient, BaseClient)
 
 APIClient.prototype.createIssueTx = function (data) {
-  return this._postRequest('/createIssueTx', data)
+  return this._postRequest('createIssueTx', data)
 }
 
 APIClient.prototype.createTransferTx = function (data) {
-  return this._postRequest('/createTransferTx', data)
+  return this._postRequest('createTransferTx', data)
 }
 
 APIClient.prototype.getTx = function (txId) {
-  return this._getRequest('/getTx', {txId: txId}).then(function (res) {
+  return this._getRequest('getTx', {txId: txId}).then(function (res) {
     return res.tx
   })
 }
 
 APIClient.prototype.newMonitoringGroup = function () {
   var self = this
-  return this._postRequest('/tsm/newMonitoringGroup', {})
+  return this._postRequest('tsm/newMonitoringGroup', {})
       .then(function (res) {
           return new TSMClient(self.url, res.groupId)
       })
@@ -68,18 +68,26 @@ APIClient.prototype.getMonitoringGroup = function (groupId) {
 }
 
 APIClient.prototype.broadcastTx = function (txHex) {
-  return this._postRequest('/broadcastTx', {tx: txHex})
+  return this._postRequest('broadcastTx', {tx: txHex})
 }
 
 APIClient.prototype.getUnspentCoins = function (addresses, color) {
-  return this._postRequest('/getUnspentCoins',
+  return this._postRequest('getUnspentCoins',
                            {addresses: addresses, color: color})
 }
 
 APIClient.prototype.getAllColoredCoins = function (color, unspent) {
   if (!unspent) unspent = false
-  return this._getRequest('/getAllColoredCoins',
+  return this._getRequest('getAllColoredCoins',
                            {color: color, unspent: unspent})
+}
+
+APIClient.prototype.getTxColorValues = function (txId, outputs) {
+  var data = {txid: txId}
+  if (outputs) data.outputs = outputs
+  return this._postRequest('getTxColorValues', data).then(function (res) {
+    return res.colorvalues
+  })
 }
 
 function TSMClient(url, groupId) {

@@ -4,8 +4,9 @@ var Q = require('q')
 var fs = require('fs')
 var helper = require('../helper')
 var Client = require('../client')
+var _ = require('lodash')
 
-var args = nopt({url: String, fname: String, command: String})
+var args = nopt({dry: Boolean, url: String, fname: String, command: String})
 
 var fname = args.argv.remain.shift() || args.fname
 var command = args.argv.remain.shift() || args.command || 'show'
@@ -31,7 +32,7 @@ function withState (fun) {
     state = _state
     return state
   }).then(fun).then(function () {
-    return saveState(state)
+    if (!args.dry) return saveState(state)
   })
 }
 
@@ -42,8 +43,21 @@ function makeNewAddressPath(state, pathPrefix) {
   return pathPrefix + '/' + state.hdPaths[pathPrefix].toString()
 }
 
+function registerNewAddress (state, address, path) {
+  if (state.knownAddresses === undefined) state.knownAddresses = {}
+  state.knownAddresses[address] = path 
+  return address
+}
+
+function makeNewAddress (state, masterKey, pathPrefix) {
+  var path = makeNewAddressPath(state, pathPrefix)
+  var address = helper.getAddress(masterKey, path)
+  return registerNewAddress(state, address, path)
+}
+
 var wPaths = {
-  bitcoin: 'm/0/0'
+  bitcoin: 'm/0/0',
+  colored: 'm/1',
 }
 
 
@@ -66,10 +80,6 @@ function getAllFundingAddresses(state, masterKey) {
   return addresses
 }
 
-function registerNewAddress (state, address, path) {
-  if (state.knownAddresses === undefined) state.knownAddresses = {}
-  state.knownAddresses[address] = path 
-}
 
 commands.show_funding_addresses = function () {
   return withState(function (state) {
@@ -93,8 +103,10 @@ function processTxRecord(state,  txRecord) {
   if (state.txIds[txRecord.txId] === undefined) {
     // previously unknown transaction
     state.txIds[txRecord.txId] = true
-    return client.getTx(txRecord.txId).then(function (tx) {
-      helper.getOutputCoins(tx).forEach(function (coin) {
+    return Q.all([client.getTx(txRecord.txId),
+                  client.getTxColorValues(txRecord.txId)])
+    .spread(function (tx, colorValues) {
+      helper.getOutputCoins(tx, colorValues).forEach(function (coin) {
         if (knownAddresses[coin.address] !== undefined) {
           coin.status = txRecord.status
           if (txRecord.blockHeight)
@@ -131,6 +143,50 @@ commands.sync = function () {
       })
   })
 }
+
+function selectCoins(state, color) {
+  if (!state.coins) throw new Error('no coins')
+  var ccoins =  _.filter(state.coins, {color: color})
+  return _.reject(ccoins, 'committed')
+}
+
+commands.issue_coins = function () {
+  return withState(function (state) {
+    var masterKey = helper.getMasterKey(state.seed)
+    var uncoloredCoins = selectCoins(state, '')
+    if (uncoloredCoins.length === 0) throw new Error('no uncolored coins in the wallet')
+    var colorPath = makeNewAddressPath(state, wPaths.colored)
+    var targetAddress = makeNewAddress(state, masterKey, colorPath)
+    var targetAmount = 10000
+    var changeAddress = getAllFundingAddresses(state, masterKey)[0]
+
+    var txSpec = {
+      target: { address: targetAddress, value: targetAmount },
+      sourceCoins: { "": uncoloredCoins }, // API only needs txId and outIndex properties
+      changeAddress: { "": changeAddress },
+      colorKernel: "epobc"
+    }
+    return client.createIssueTx(txSpec).then(function(res) {
+      if (state.pendingTransactions === undefined) state.pendingTransactions = []
+      if (!_.isArray(res.input_coins)) throw new Error('lacking res.input_coins')
+      var usedCoins = []
+      // commit coins
+      uncoloredCoins.forEach(function (coin) {
+          if (_.find(res.input_coins, {txId: coin.txId, outIndex: coin.outIndex})) {
+            usedCoins.push(coin)
+            coin.committed = {type:'issue', colorPath: colorPath}
+          }
+      })
+      var pendingTx = {
+        txHex: res.tx,
+        // we use same object, but add more fields
+        singatures: usedCoins
+      }
+      state.pendingTransactions.push(pendingTx)
+    })
+  })
+}
+
 
 commands.show_coins = function () {
   return withState(function (state) {
