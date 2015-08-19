@@ -168,11 +168,11 @@ commands.issue_coins = function () {
     }
     return client.createIssueTx(txSpec).then(function(res) {
       if (state.pendingTransactions === undefined) state.pendingTransactions = []
-      if (!_.isArray(res.input_coins)) throw new Error('lacking res.input_coins')
+      if (!_.isArray(res.inputCoins)) throw new Error('lacking res.input_coins')
       var usedCoins = []
       // commit coins
       uncoloredCoins.forEach(function (coin) {
-          if (_.find(res.input_coins, {txId: coin.txId, outIndex: coin.outIndex})) {
+          if (_.find(res.inputCoins, {txId: coin.txId, outIndex: coin.outIndex})) {
             usedCoins.push(coin)
             coin.committed = {type:'issue', colorPath: colorPath}
           }

@@ -82,12 +82,24 @@ APIClient.prototype.getAllColoredCoins = function (color, unspent) {
                            {color: color, unspent: unspent})
 }
 
-APIClient.prototype.getTxColorValues = function (txId, outputs) {
-  var data = {txid: txId}
-  if (outputs) data.outputs = outputs
+APIClient.prototype.getTxColorValues = function (txId, outIndices) {
+  var data = {txId: txId}
+  if (outIndices !== undefined) {
+    if (_.isArray(outIndices) || outIndices === null)
+      data.outIndices = outIndices
+    else
+      data.outIndex = outIndices
+  }
+
   return this._postRequest('getTxColorValues', data).then(function (res) {
-    return res.colorvalues
+    return res.colorValues
   })
+}
+
+APIClient.prototype.getTxOutputColorValue = function (txId, outIndex) {
+  return this._postRequest('getTxColorValues', {txId: txId, outIndex: outIndex}).then(function (res) {
+    return res.colorValues[outIndex]
+  })  
 }
 
 function TSMClient(url, groupId) {
