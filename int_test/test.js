@@ -150,6 +150,31 @@ function selectCoins(state, color) {
   return _.reject(ccoins, 'committed')
 }
 
+function commitCoins(state, selectedCoins, inputCoins, commitment) {
+  // note: used coins go in same order as input coins
+  var usedCoins = []
+  inputCoins.forEach(function (iCoin) {
+    var coin = _.find(selectedCoins, 
+      {txId: iCoin.txId, outIndex: iCoin.outIndex})
+    if (coin) {
+      coin.committed = commitment
+      // We need to store coin in the pending transaction itself.
+      // It will be used for collecting signatures.
+      var txCoin = _.clone(coin)
+      // For now just the simplest case: P2PKH
+      var path = state.knownAddresses[coin.address]
+      if (path && _.isString(path))
+        txCoin.signatures = [{userId: 0, path: path}]
+      else
+        throw new Exception('TODO: handle multisig')
+      usedCoins.push(txCoin)
+    } else {
+      throw new Error('input coin not found ', iCoin)
+    }
+  })
+  return usedCoins        
+}
+
 commands.issue_coins = function () {
   return withState(function (state) {
     var masterKey = helper.getMasterKey(state.seed)
@@ -168,25 +193,99 @@ commands.issue_coins = function () {
     }
     return client.createIssueTx(txSpec).then(function(res) {
       if (state.pendingTransactions === undefined) state.pendingTransactions = []
-      if (!_.isArray(res.inputCoins)) throw new Error('lacking res.input_coins')
-      var usedCoins = []
-      // commit coins
-      uncoloredCoins.forEach(function (coin) {
-          if (_.find(res.inputCoins, {txId: coin.txId, outIndex: coin.outIndex})) {
-            usedCoins.push(coin)
-            coin.committed = {type:'issue', colorPath: colorPath}
-          }
-      })
+      if (!_.isArray(res.inputCoins)) throw new Error('got bad reply from service')
+      var purpose = {type:'issue', colorPath: colorPath}
+      var usedCoins = commitCoins(state, uncoloredCoins, res.inputCoins, purpose)
       var pendingTx = {
         txHex: res.tx,
-        // we use same object, but add more fields
-        singatures: usedCoins
+        purpose: purpose,
+        coins: usedCoins
       }
       state.pendingTransactions.push(pendingTx)
     })
   })
 }
 
+commands.sign_pending_txs = function () {
+  return withState(function (state) {
+    if (!state.pendingTransactions || state.pendingTransactions.length === 0) {
+      console.log('nothing to sign')
+      return
+    }
+    var masterKey = helper.getMasterKey(state.seed)
+    state.pendingTransactions.forEach(function (pendingTx) {
+      var tx = helper.decodeTransaction(pendingTx.txHex, pendingTx.coins)
+      pendingTx.coins.forEach(function (coin, inputIndex) {
+        coin.signatures.forEach(function (signatureS) {
+          if (signatureS.signature) return // signature already provided
+          if (signatureS.userId === 0) { // our
+            var path = signatureS.path
+            console.log('signing ' + path)
+            var signature = helper.makeTxSignature(tx, masterKey, path, inputIndex)
+            console.log(signature)
+            signatureS.signature = signature
+          } else {
+            console.log(' need signature from ' + signatureS.user_id + ' ' + signatureS.path)
+          }
+        })
+      })
+    })
+  })
+}
+
+commands.broadcast_txs = function () {
+  return withState(function (state) {
+    if (!state.pendingTransactions || state.pendingTransactions.length === 0) {
+      console.log('nothing to broadcast')
+      return null
+    }
+    var broadcastTxs = []
+    var processedTransactions = []
+    state.pendingTransactions.forEach(function (pendingTx) {
+      var signatures = []
+      var missing = false
+      pendingTx.coins.forEach(function (coin) {
+        coin.signatures.forEach(function (signatureS) {
+          if (signatureS.signature)
+            signatures.push(signatureS.signature)
+          else {
+            console.log(' need signature from ' + signatureS.user_id + ' ' + signatureS.path)
+            missing = true
+          }          
+        })
+      })
+      if (missing) {
+        console.log('pending transaction lacks some signatures')
+      } else {
+        var tx = helper.decodeTransaction(pendingTx.txHex, pendingTx.coins)
+        var finTx = helper.finalizeTransaction(tx, signatures)
+        console.log('txId:', finTx.txId)
+        console.log('txHex:', finTx.txHex)
+        broadcastTxs.push(finTx)
+        processedTransactions.push(pendingTx)
+      }
+    })
+    state.pendingTransactions = _.without(state.pendingTransactions,
+                                          processedTransactions)
+    if (broadcastTxs.length) {
+      return client.getMonitoringGroup(state.mGroupId)
+        .then(function (mg) {
+            return Q.all(broadcastTxs.map(function (tx) {
+              return mg.addTx(tx.txId).then(function () {
+                console.log(tx.txId, ' monitored, broadcasting...')
+                return client.broadcastTx(tx.txHex)
+              }).then(function () {
+                // we can do this only after it is broadcasted because
+                // we do API calls
+                return processTxRecord(state, {
+                  txId: tx.txId, status: 'unconfirmed'
+                })
+              })
+            }))
+        })      
+    } else return null
+  })  
+}
 
 commands.show_coins = function () {
   return withState(function (state) {
