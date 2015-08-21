@@ -6,12 +6,13 @@ var helper = require('../helper')
 var Client = require('../client')
 var _ = require('lodash')
 
-var args = nopt({dry: Boolean, url: String, fname: String, command: String})
+var args = nopt({dry: Boolean, url: String})
 
-var fname = args.argv.remain.shift() || args.fname
-var command = args.argv.remain.shift() || args.command || 'show'
+var fname = args.argv.remain.shift()
+var command = args.argv.remain.shift()
 
 var commands = {}
+var command_args = {}
 
 var url = args.url || 'http://localhost:4444/api/'
 var client = new Client(url)
@@ -55,9 +56,20 @@ function makeNewAddress (state, masterKey, pathPrefix) {
   return registerNewAddress(state, address, path)
 }
 
+function makeMultiSigAddress(state, userId, masterKey, userMasterKey) {
+  var pathPrefix = wPaths.cosign + userId.toString()
+  var path = makeNewAddressPath(state, pathPrefix)
+  // both wallets use the same path
+  var pubkey1 = helper.getPublicKey(masterKey, path)
+  var pubkey2 = helper.getPublicKey(userMasterKey, path)
+  var address = helper.makeMultiSigAddress([pubkey1, pubkey2])
+  return registerNewAddress(state, address, {type: "P2SH/multisig", path: path, userId: userId})
+}
+
 var wPaths = {
   bitcoin: 'm/0/0',
   colored: 'm/1',
+  cosign: 'm/2'
 }
 
 
@@ -68,6 +80,19 @@ commands.generate = function () {
       seed: helper.generateSeed()
     }
     return Q.nfcall(fs.writeFile, fname, JSON.stringify(state))
+  })
+}
+
+// generate a user for testing multi-sig
+commands.generate_user = function () {
+  return withState(function (state) {
+    if (state.lastUserId === undefined) state.lastUserId = 0
+    state.lastUserId += 1
+    var userId = state.lastUserId
+    if (state.users === undefined) state.users = {}
+    state.users[userId] = {
+      seed: helper.generateSeed()
+    }
   })
 }
 
@@ -287,11 +312,25 @@ commands.broadcast_txs = function () {
   })  
 }
 
+commands.transfer_tokens = function () {
+  return withState(function (state) {
+    var userId = 1
+    if (!state.users || state.users[userId] === undefined) throw new Error('user not found')
+    var masterKey = helper.getMasterKey(state.seed)
+    var userMasterKey = helper.getMasterKey(state.users[userId].seed)
+    console.log(makeMultiSigAddress(state, userId, masterKey, userMasterKey))
+        
+    
+  })
+}
+
 commands.show_coins = function () {
   return withState(function (state) {
     console.log(state.coins)
   })
 }
+
+
 
 
 if (commands[command]) {
@@ -304,4 +343,6 @@ if (commands[command]) {
         })
 } else {
   console.log('command not recognized')
+  console.log("usage: node test.js state.json command")
+  console.log('commands: ', _.keys(commands))
 }

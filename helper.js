@@ -1,8 +1,20 @@
 var bitcore = require('bitcore')
 var _ = require('lodash')
 
+//TODO: make configurable
+var bitcoinNetwork = bitcore.Networks.testnet
+
 exports.getAddress = function (masterKey, path) {
   return masterKey.derive(path).privateKey.toAddress().toString()
+}
+
+exports.getPublicKey = function (masterKey, path) {
+  return masterKey.derive(path).privateKey.publicKey
+}
+
+exports.makeMultiSigAddress = function (publicKeys) {
+  return bitcore.Address(publicKeys, publicKeys.length,
+                         bitcoinNetwork).toString()
 }
 
 exports.getMasterKey = function (seed) {
@@ -14,7 +26,7 @@ exports.generateSeed = function () {
   return bitcore.crypto.Random.getRandomBuffer(64).toString('hex')
 }
     
-var bitcoinNetwork = bitcore.Networks.testnet
+
 
 exports.getOutputCoins = function (txHex, colorValues) {
   var tx = new bitcore.Transaction(txHex)
