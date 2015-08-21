@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -e
+
+if [ -z "$1" ]
+  then
+    echo "call like this: ./step1 state111.json" && exit 1
+fi
+
+node test.js $1 generate
+node test.js $1 show_funding_addresses

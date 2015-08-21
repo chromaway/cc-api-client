@@ -96,3 +96,7 @@ exports.finalizeTransaction = function (decodedTx, signatures) {
     txId: decodedTx.id
   }
 }
+
+exports.makeColorDesc = function (txId) {
+  return "epobc:" + txId + ":0:0"
+}

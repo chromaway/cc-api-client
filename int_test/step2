@@ -1,0 +1,16 @@
+#!/bin/bash
+
+set -e
+
+if [ -z "$1" ]
+  then
+    echo "call like this: ./step1 state111.json" && exit 1
+fi
+
+node test.js $1 sync
+node test.js $1 issue_coins
+node test.js $1 sign_pending_txs
+node test.js $1 broadcast_txs
+node test.js $1 generate_user
+node test.js $1 sync
+node test.js $1 transfer_tokens

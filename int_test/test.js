@@ -200,6 +200,19 @@ function commitCoins(state, selectedCoins, inputCoins, commitment) {
   return usedCoins        
 }
 
+// second parameter is a result of create*Tx API calls
+function registerPendingTransaction(state, res, selectedCoins, purpose) {
+  if (state.pendingTransactions === undefined) state.pendingTransactions = []
+  if (!_.isArray(res.inputCoins)) throw new Error('got bad reply from service')
+  var usedCoins = commitCoins(state, selectedCoins, res.inputCoins, purpose)
+  var pendingTx = {
+    txHex: res.tx,
+    purpose: purpose,
+    coins: usedCoins
+  }
+  state.pendingTransactions.push(pendingTx)
+}
+
 commands.issue_coins = function () {
   return withState(function (state) {
     var masterKey = helper.getMasterKey(state.seed)
@@ -217,16 +230,9 @@ commands.issue_coins = function () {
       colorKernel: "epobc"
     }
     return client.createIssueTx(txSpec).then(function(res) {
-      if (state.pendingTransactions === undefined) state.pendingTransactions = []
-      if (!_.isArray(res.inputCoins)) throw new Error('got bad reply from service')
       var purpose = {type:'issue', colorPath: colorPath}
-      var usedCoins = commitCoins(state, uncoloredCoins, res.inputCoins, purpose)
-      var pendingTx = {
-        txHex: res.tx,
-        purpose: purpose,
-        coins: usedCoins
-      }
-      state.pendingTransactions.push(pendingTx)
+      registerPendingTransaction(state, res, uncoloredCoins, purpose)
+      return
     })
   })
 }
@@ -286,6 +292,7 @@ commands.broadcast_txs = function () {
         var finTx = helper.finalizeTransaction(tx, signatures)
         console.log('txId:', finTx.txId)
         console.log('txHex:', finTx.txHex)
+        finTx.purpose = pendingTx.purpose
         broadcastTxs.push(finTx)
         processedTransactions.push(pendingTx)
       }
@@ -300,6 +307,11 @@ commands.broadcast_txs = function () {
                 console.log(tx.txId, ' monitored, broadcasting...')
                 return client.broadcastTx(tx.txHex)
               }).then(function () {
+                if (tx.purpose.type === 'issue') {
+                  // register issued color
+                  if (state.tokenColors === undefined) state.tokenColors = {}
+                  state.tokenColors[tx.purpose.colorPath] = helper.makeColorDesc(tx.txId)                  
+                }                        
                 // we can do this only after it is broadcasted because
                 // we do API calls
                 return processTxRecord(state, {
@@ -312,15 +324,39 @@ commands.broadcast_txs = function () {
   })  
 }
 
+function selectSourceCoins(state, colors) {
+  var sourceCoins = {}
+  colors.forEach(function (color) {
+    sourceCoins[color] = selectCoins(state, color)
+  })
+  return sourceCoins
+}
+
 commands.transfer_tokens = function () {
   return withState(function (state) {
+    var colorPath = 'm/1/0'
+    var color = state.tokenColors['m/1/0']
+    if (color === undefined) throw new Error('unknown token')
     var userId = 1
     if (!state.users || state.users[userId] === undefined) throw new Error('user not found')
     var masterKey = helper.getMasterKey(state.seed)
     var userMasterKey = helper.getMasterKey(state.users[userId].seed)
-    console.log(makeMultiSigAddress(state, userId, masterKey, userMasterKey))
-        
-    
+    var targetAddress = makeMultiSigAddress(state, userId, masterKey, userMasterKey)
+    var sourceCoins = selectSourceCoins(state, ["", color])
+    var selectedCoins = _.flatten(_.values(sourceCoins))
+    var changeAddress = {}
+    changeAddress[""] = getAllFundingAddresses(state, masterKey)[0]
+    changeAddress[color] = makeNewAddress(state, masterKey, colorPath)
+    var txSpec = {
+      targets: [{address: targetAddress, color: color, value: 1}],
+      sourceCoins: sourceCoins,
+      changeAddress: changeAddress
+    }
+    return client.createTransferTx(txSpec).then(function(res) {
+      var purpose = {type:'transfer', colorPath: colorPath, userId: userId}
+      registerPendingTransaction(state, res, selectedCoins, purpose)
+      return
+    })
   })
 }
 
@@ -331,18 +367,19 @@ commands.show_coins = function () {
 }
 
 
-
-
 if (commands[command]) {
   commands[command]()
       .done(
         function () {
           console.log('ok')
+          process.exit(0)
         }, function (err) {
           console.log(err.stack || err)
+          process.exit(1)
         })
 } else {
   console.log('command not recognized')
   console.log("usage: node test.js state.json command")
   console.log('commands: ', _.keys(commands))
+  process.exit(2)
 }
