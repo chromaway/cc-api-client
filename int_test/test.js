@@ -297,7 +297,7 @@ commands.broadcast_txs = function () {
         processedTransactions.push(pendingTx)
       }
     })
-    state.pendingTransactions = _.without(state.pendingTransactions,
+    state.pendingTransactions = _.difference(state.pendingTransactions,
                                           processedTransactions)
     if (broadcastTxs.length) {
       return client.getMonitoringGroup(state.mGroupId)
