@@ -64,7 +64,8 @@ function makeNewMultiSigAddress(state, userId, masterKey, userMasterKey) {
   var pubkey2 = helper.getPublicKey(userMasterKey, path)
   var address = helper.makeMultiSigAddress([pubkey1, pubkey2])
   if (state.multiSigAddresses === undefined) state.multiSigAddresses = {}
-  state.multiSigAddresses[address] = { pubkeys: [pubkey1, pubkey2], 
+  state.multiSigAddresses[address] = { pubkeys: [pubkey1.toString(),
+                                                 pubkey2.toString()], 
                                        threshold: 2  }
   return registerNewAddress(state, address, path)
 }
@@ -133,7 +134,7 @@ commands.show_funding_addresses = function () {
 function decodeAddressPath(path) {
   var parts = path.split('/')
   var res = {
-    isMultisig: parts[1] === '2',
+    isMultiSig: parts[1] === '2',
     isColored: parseInt(parts[1]) > 0    
   }
   if (parts[1] === '2') {

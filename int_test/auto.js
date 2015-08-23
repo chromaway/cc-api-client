@@ -85,6 +85,7 @@ function runTest() {
     console.log("ALL OK, see:", fname)
   }, function (err) {
     console.error(err.stack || err)
+    console.log("state: ", fname)
   })
                        
 }
