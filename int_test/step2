@@ -12,8 +12,14 @@ node test.js $1 issue_coins
 node test.js $1 sign_pending_txs
 node test.js $1 broadcast_txs
 node test.js $1 generate_user
+node test.js $1 generate_user
+node test.js $1 sync
+node test.js $1 distribute_tokens
+node test.js $1 sign_pending_txs
+node test.js $1 broadcast_txs
 node test.js $1 sync
 node test.js $1 transfer_tokens
 node test.js $1 sign_pending_txs
 node test.js $1 broadcast_txs
 node test.js $1 sync
+node test.js $1 show_coins

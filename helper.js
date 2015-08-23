@@ -60,8 +60,12 @@ exports.decodeTransaction = function (txHex, coins) {
     if (!info) throw new Error("couldn't understand script " + script.toASM())
     var inputClass
     if (info.type === bitcore.Address.PayToScriptHash) {
-      throw new Error('no multisig yet TODO')
-      //inputClass = bitcore.Transaction.Intput.MultiSigScriptHash
+      var multisigInfo = coins[index].multisig
+      if (multisigInfo === undefined) 
+        throw new Error('no info about multisig input')
+      tx.inputs[index] = new bitcore.Transaction.Input.MultiSigScriptHash(
+        input.toObject(), multisigInfo.pubkeys, multisigInfo.threshold
+      )
     } else if (info.type === bitcore.Address.PayToPublicKeyHash) {
       tx.inputs[index] = new bitcore.Transaction.Input.PublicKeyHash(input.toObject())
     } else throw new Error("do not understand output script " + script.toASM())    

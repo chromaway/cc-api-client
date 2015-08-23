@@ -74,6 +74,7 @@ APIClient.prototype.broadcastTx = function (txHex) {
 APIClient.prototype.getUnspentCoins = function (addresses, color) {
   return this._postRequest('getUnspentCoins',
                            {addresses: addresses, color: color})
+  .then(function (res) { return res.coins })
 }
 
 APIClient.prototype.getAllColoredCoins = function (color, unspent) {

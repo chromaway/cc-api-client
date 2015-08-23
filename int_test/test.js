@@ -56,14 +56,17 @@ function makeNewAddress (state, masterKey, pathPrefix) {
   return registerNewAddress(state, address, path)
 }
 
-function makeMultiSigAddress(state, userId, masterKey, userMasterKey) {
-  var pathPrefix = wPaths.cosign + userId.toString()
+function makeNewMultiSigAddress(state, userId, masterKey, userMasterKey) {
+  var pathPrefix = wPaths.cosign + '/' + userId.toString()
   var path = makeNewAddressPath(state, pathPrefix)
   // both wallets use the same path
   var pubkey1 = helper.getPublicKey(masterKey, path)
   var pubkey2 = helper.getPublicKey(userMasterKey, path)
   var address = helper.makeMultiSigAddress([pubkey1, pubkey2])
-  return registerNewAddress(state, address, {type: "P2SH/multisig", path: path, userId: userId})
+  if (state.multiSigAddresses === undefined) state.multiSigAddresses = {}
+  state.multiSigAddresses[address] = { pubkeys: [pubkey1, pubkey2], 
+                                       threshold: 2  }
+  return registerNewAddress(state, address, path)
 }
 
 var wPaths = {
@@ -107,19 +110,38 @@ function getAllFundingAddresses(state, masterKey) {
 
 
 commands.show_funding_addresses = function () {
+  var address
   return withState(function (state) {
     var masterKey = helper.getMasterKey(state.seed)
     // generate a new one
     var path = makeNewAddressPath(state, wPaths.bitcoin)
-    var address = helper.getAddress(masterKey, path)
+    address = helper.getAddress(masterKey, path)
     registerNewAddress(state, address, path)
     return client.getMonitoringGroup(state.mGroupId)
       .then(function (mg) {
         return mg.addAddress(address)
       }).then(function () {
         console.log(getAllFundingAddresses(state, masterKey))
+        return address
       })
-  })
+  }).then(function () {return address})
+}
+
+// we structure wallet in particular way and thus can
+// find information about owner and type of address
+// from path
+function decodeAddressPath(path) {
+  var parts = path.split('/')
+  var res = {
+    isMultisig: parts[1] === '2',
+    isColored: parseInt(parts[1]) > 0    
+  }
+  if (parts[1] === '2') {
+    res.userId = parseInt(parts[2])
+  } else {
+    res.userId = 0
+  }
+  return res
 }
 
 function processTxRecord(state,  txRecord) {
@@ -133,11 +155,20 @@ function processTxRecord(state,  txRecord) {
     .spread(function (tx, colorValues) {
       helper.getOutputCoins(tx, colorValues).forEach(function (coin) {
         if (knownAddresses[coin.address] !== undefined) {
+          var addressInfo = decodeAddressPath(knownAddresses[coin.address])
+          if (addressInfo.isMultiSig) {
+            var multiSigInfo = state.multiSigAddresses[coin.address]
+            if (multiSigInfo === undefined) throw new Error('no info about multisig address ' + coin.address)
+            coin.multisig = multiSigInfo
+          }
+          coin.userId = addressInfo.userId
           coin.status = txRecord.status
           if (txRecord.blockHeight)
             coin.blockHeight = txRecord.blockHeight
           console.log(coin)
           state.coins.push(coin)
+        } else {
+          console.log('WARNING: unknown address ', coin.address)
         }
       })
     })
@@ -169,9 +200,10 @@ commands.sync = function () {
   })
 }
 
-function selectCoins(state, color) {
+function selectCoins(state, color, userId) {
   if (!state.coins) throw new Error('no coins')
-  var ccoins =  _.filter(state.coins, {color: color})
+  if (userId === undefined) userId = 0
+  var ccoins =  _.filter(state.coins, {color: color, userId: userId})
   return _.reject(ccoins, 'committed')
 }
 
@@ -186,12 +218,16 @@ function commitCoins(state, selectedCoins, inputCoins, commitment) {
       // We need to store coin in the pending transaction itself.
       // It will be used for collecting signatures.
       var txCoin = _.clone(coin)
-      // For now just the simplest case: P2PKH
       var path = state.knownAddresses[coin.address]
-      if (path && _.isString(path))
+      var addressPathInfo = decodeAddressPath(path)
+      if (addressPathInfo.isMultiSig) {
+        txCoin.signatures = [
+          { userId: 0, path: path },
+          { userId: addressPathInfo.userId, path: path }
+        ]
+      } else {
         txCoin.signatures = [{userId: 0, path: path}]
-      else
-        throw new Exception('TODO: handle multisig')
+      }
       usedCoins.push(txCoin)
     } else {
       throw new Error('input coin not found ', iCoin)
@@ -249,15 +285,18 @@ commands.sign_pending_txs = function () {
       pendingTx.coins.forEach(function (coin, inputIndex) {
         coin.signatures.forEach(function (signatureS) {
           if (signatureS.signature) return // signature already provided
-          if (signatureS.userId === 0) { // our
-            var path = signatureS.path
-            console.log('signing ' + path)
-            var signature = helper.makeTxSignature(tx, masterKey, path, inputIndex)
-            console.log(signature)
-            signatureS.signature = signature
+          var path = signatureS.path
+          console.log('signing ' + path + ' as ' + signatureS.userId)
+          var signMasterKey
+          if (signatureS.userId === 0) {
+            signMasterKey = masterKey // our
           } else {
-            console.log(' need signature from ' + signatureS.user_id + ' ' + signatureS.path)
+            // sign as other user (normally happens in browser)
+            signMasterKey = helper.getMasterKey(state.users[signatureS.userId].seed)
           }
+          var signature = helper.makeTxSignature(tx, signMasterKey, path, inputIndex)
+          console.log(signature)
+          signatureS.signature = signature
         })
       })
     })
@@ -324,15 +363,16 @@ commands.broadcast_txs = function () {
   })  
 }
 
-function selectSourceCoins(state, colors) {
+function selectSourceCoins(state, coinKinds) {
   var sourceCoins = {}
-  colors.forEach(function (color) {
-    sourceCoins[color] = selectCoins(state, color)
+  coinKinds.forEach(function (coinKind) {
+    sourceCoins[coinKind.color] = selectCoins(state, coinKind.color, coinKind.userId)
   })
   return sourceCoins
 }
 
-commands.transfer_tokens = function () {
+// from operator to user
+commands.distribute_tokens = function () {
   return withState(function (state) {
     var colorPath = 'm/1/0'
     var color = state.tokenColors['m/1/0']
@@ -341,8 +381,10 @@ commands.transfer_tokens = function () {
     if (!state.users || state.users[userId] === undefined) throw new Error('user not found')
     var masterKey = helper.getMasterKey(state.seed)
     var userMasterKey = helper.getMasterKey(state.users[userId].seed)
-    var targetAddress = makeMultiSigAddress(state, userId, masterKey, userMasterKey)
-    var sourceCoins = selectSourceCoins(state, ["", color])
+    var targetAddress = makeNewMultiSigAddress(state, userId, masterKey, userMasterKey)
+    var sourceCoins = selectSourceCoins(state, [
+                                          {color: "", userId: 0}, 
+                                          {color: color, userId:0}])
     var selectedCoins = _.flatten(_.values(sourceCoins))
     var changeAddress = {}
     changeAddress[""] = getAllFundingAddresses(state, masterKey)[0]
@@ -360,6 +402,42 @@ commands.transfer_tokens = function () {
   })
 }
 
+// from user to user (multi-sig)
+commands.transfer_tokens = function () {
+  return withState(function (state) {
+    var colorPath = 'm/1/0'
+    var color = state.tokenColors['m/1/0']
+    if (color === undefined) throw new Error('unknown token')
+    var senderUserId = 1
+    var receiverUserId = 2
+    if (!state.users || state.users[senderUserId] === undefined) throw new Error('user not found')
+    if (state.users[receiverUserId] === undefined) throw new Error('user not found')
+    var masterKey = helper.getMasterKey(state.seed)
+    var senderMasterKey = helper.getMasterKey(state.users[senderUserId].seed)
+    var receiverMasterKey = helper.getMasterKey(state.users[receiverUserId].seed)
+    var targetAddress = makeNewMultiSigAddress(state, receiverUserId, masterKey, receiverMasterKey)
+    var sourceCoins = selectSourceCoins(state, [
+                                          {color: "", userId: 0},
+                                          {color: color, userId: senderUserId}])
+    var selectedCoins = _.flatten(_.values(sourceCoins))
+    var changeAddress = {}
+    changeAddress[""] = getAllFundingAddresses(state, masterKey)[0]
+    // TODO: check if we even need change
+    changeAddress[color] = makeNewMultiSigAddress(state, senderUserId, masterKey, senderMasterKey)
+    var txSpec = {
+      targets: [{address: targetAddress, color: color, value: 1}],
+      sourceCoins: sourceCoins,
+      changeAddress: changeAddress
+    }
+    return client.createTransferTx(txSpec).then(function(res) {
+      var purpose = {type:'transfer', colorPath: colorPath, senderUserId: senderUserId, receiverUserId: receiverUserId}
+      registerPendingTransaction(state, res, selectedCoins, purpose)
+      return
+    })
+  })
+}
+
+
 commands.show_coins = function () {
   return withState(function (state) {
     console.log(state.coins)
@@ -371,7 +449,7 @@ if (commands[command]) {
   commands[command]()
       .done(
         function () {
-          console.log('ok')
+          console.log(command, '- ok')
           process.exit(0)
         }, function (err) {
           console.log(err.stack || err)
@@ -381,5 +459,15 @@ if (commands[command]) {
   console.log('command not recognized')
   console.log("usage: node test.js state.json command")
   console.log('commands: ', _.keys(commands))
-  process.exit(2)
+  // process.exit(2)
+}
+
+function setFileName(_fname) {  fname = _fname }
+
+module.exports = {
+  commands: commands,
+  setFileName: setFileName,
+  getUrl: function () {
+    return url
+  }
 }
