@@ -62,7 +62,7 @@ function runCommands(promise, commands) {
 
 function runTest() {
   var fname = makeRandomId() + '.json'
-  test.setFileName(makeRandomId() + '.json')
+  test.setFileName(fname)
   
   var promise = runCommand('generate').then(function () {
     return test.commands.show_funding_addresses().then(function (address) {
