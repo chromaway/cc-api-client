@@ -1,5 +1,6 @@
 var bitcore = require('bitcore')
 var _ = require('lodash')
+var Q = require('q')
 
 //TODO: make configurable
 var bitcoinNetwork = bitcore.Networks.testnet
@@ -26,8 +27,6 @@ exports.generateSeed = function () {
   return bitcore.crypto.Random.getRandomBuffer(64).toString('hex')
 }
     
-
-
 exports.getOutputCoins = function (txHex, colorValues) {
   var tx = new bitcore.Transaction(txHex)
   return tx.outputs.map(function (output, idx) {
@@ -48,6 +47,31 @@ exports.getOutputCoins = function (txHex, colorValues) {
         address: output.script.toAddress(bitcoinNetwork).toString()
       }
   })
+}
+
+function getTxOutputCoins (client, txId) {
+  return Q.all([client.getTx(txId), client.getTxColorValues(txId)])
+  .spread(function (txHex, colorValues) {
+      return exports.getOutputCoins(txHex, colorValues)
+  })
+}
+
+exports.getTxInfo = function (client, txId) {
+  return client.getTx(txId).then(function (txHex) {
+    var tx = new bitcore.Transaction(txHex)
+    return Q.all(tx.inputs.map(function (input, idx) {
+      var inputObject = input.toObject()
+      return getTxOutputCoins(client, inputObject.prevTxId)
+      .then(function (coins) { return coins[inputObject.outputIndex] })
+    }))
+  }).then(function (inputCoins) {
+    return Q.all([getTxOutputCoins(client, txId), inputCoins])
+  }).spread(function (outputCoins, inputCoins) {
+    return {
+      inputCoins: inputCoins,
+      outputCoins: outputCoins
+    }
+  })  
 }
 
 exports.decodeTransaction = function (txHex, coins) {
