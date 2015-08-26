@@ -2,8 +2,11 @@ var bitcore = require('bitcore')
 var _ = require('lodash')
 var Q = require('q')
 
-//TODO: make configurable
 var bitcoinNetwork = bitcore.Networks.testnet
+
+exports.setBitcoinNetwork = function (networkName) {
+  bitcoinNetwork = bitcore.Networks.get(networkName)
+}
 
 exports.getAddress = function (masterKey, path) {
   return masterKey.derive(path).privateKey.toAddress().toString()
