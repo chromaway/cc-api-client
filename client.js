@@ -5,32 +5,34 @@ var _ = require('lodash')
 
 function BaseClient(url) {
   this.url = url
-}
+} 
 
 BaseClient.prototype._postRequest = function (method, data) {
+  var uri = this.url + method
   return Q.nfcall(request, {
-    method: 'POST', 
-    uri: this.url + method, 
-    body: data, 
+    method: 'POST',
+    uri: uri,
+    body: data,
     json: true})
   .spread(function (response, body) {
     if (response.statusCode !== 200)
-      throw new Error('server returned status code ' + response.statusCode)
+      throw new Error(uri + ' returned status code ' + response.statusCode)
     return body
   })
-}
+} 
 
 BaseClient.prototype._getRequest = function (method, data) {
   var queryString = _.map(data, function (val, key) {
     return [key, val].map(encodeURIComponent).join('=')
   }).join('&')
+  var uri = this.url + method + '?' + queryString
   return Q.nfcall(request, {
-    method: 'GET', 
-    uri: this.url + method + '?' + queryString,
+    method: 'GET',
+    uri: uri,
     json: true})
   .spread(function (response, body) {
     if (response.statusCode !== 200)
-      throw new Error('server returned status code ' + response.statusCode)
+      throw new Error(uri + ' returned status code ' + response.statusCode)
     return body
   })
 }
