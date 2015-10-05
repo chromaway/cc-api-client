@@ -16,6 +16,10 @@ exports.getPublicKey = function (masterKey, path) {
   return masterKey.derive(path).privateKey.publicKey
 }
 
+exports.getExtendedPublicKey = function (masterKey, path) {
+  return masterKey.derive(path).xpubkey
+}
+
 exports.makeMultiSigAddress = function (publicKeys) {
   return bitcore.Address(publicKeys, publicKeys.length,
                          bitcoinNetwork).toString()
