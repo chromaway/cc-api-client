@@ -7,33 +7,69 @@ function BaseClient(url) {
   this.url = url
 } 
 
+BaseClient.prototype.beforeRequestCallback = function () {}
+BaseClient.prototype.afterRequestCallback = function () {}
+
+BaseClient.prototype.setCallbacks = function (before, after) {
+  this.beforeRequestCallback = before
+  this.afterRequestCallback = after
+}
+
 BaseClient.prototype._postRequest = function (method, data) {
+  var self = this
   var uri = this.url + method
+  var callInfo = {
+    httpMethod: "POST", uri: uri, method: method, data: data
+  }
+  this.beforeRequestCallback(callInfo)
   return Q.nfcall(request, {
     method: 'POST',
     uri: uri,
     body: data,
-    json: true})
-  .spread(function (response, body) {
+    json: true
+  }).spread(function (response, body) {
+    callInfo.statusCode = response.statusCode
+    callInfo.body = body
+    callInfo.ok = (response.statusCode == 200)
+    self.afterRequestCallback(callInfo)
     if (response.statusCode !== 200)
       throw new Error(uri + ' returned status code ' + response.statusCode)
     return body
+  }, function (error) {
+    callInfo.error = error
+    callInfo.ok = false
+    self.afterRequestCallback(callInfo)
+    throw error
   })
 } 
 
 BaseClient.prototype._getRequest = function (method, data) {
+  var self = this
   var queryString = _.map(data, function (val, key) {
     return [key, val].map(encodeURIComponent).join('=')
   }).join('&')
   var uri = this.url + method + '?' + queryString
+  var callInfo = {
+    httpMethod: "GET", uri: uri, method: method, data: data
+  }
+  this.beforeRequestCallback(callInfo)
   return Q.nfcall(request, {
     method: 'GET',
     uri: uri,
-    json: true})
-  .spread(function (response, body) {
+    json: true
+  }).spread(function (response, body) {
+    callInfo.statusCode = response.statusCode
+    callInfo.body = body
+    callInfo.ok = (response.statusCode == 200)
+    self.afterRequestCallback(callInfo)
     if (response.statusCode !== 200)
       throw new Error(uri + ' returned status code ' + response.statusCode)
     return body
+  }, function (error) {
+    callInfo.error = error
+    callInfo.ok = false
+    self.afterRequestCallback(callInfo)
+    throw error   
   })
 }
 
@@ -61,12 +97,16 @@ APIClient.prototype.newMonitoringGroup = function () {
   var self = this
   return this._postRequest('tsm/newMonitoringGroup', {})
       .then(function (res) {
-          return new TSMClient(self.url, res.groupId)
+          var tsmClient = new TSMClient(self.url, res.groupId)
+          tsmClient.setCallbacks(self.beforeRequestCallback, self.afterRequestCallback)
+          return tsmClient
       })
 }
 
 APIClient.prototype.getMonitoringGroup = function (groupId) {
-  return Q(new TSMClient(this.url, groupId))
+  var tsmClient = new TSMClient(this.url, groupId)
+  tsmClient.setCallbacks(this.beforeRequestCallback, this.afterRequestCallback)
+  return Q(tsmClient)
 }
 
 APIClient.prototype.broadcastTx = function (txHex) {
@@ -118,18 +158,18 @@ TSMClient.prototype.getId = function () {
 }
 
 TSMClient.prototype.addTx = function (txId) {
-  return this._postRequest('/tsm/addTx', 
+  return this._postRequest('tsm/addTx', 
     {groupId: this.groupId, txId: txId})
 }
 
 TSMClient.prototype.addAddress = function (address) {
-  return this._postRequest('/tsm/addAddress', 
+  return this._postRequest('tsm/addAddress', 
     {groupId: this.groupId, address: address})
 }
 
 TSMClient.prototype.getUpdates = function () {
   var self = this
-  return this._postRequest('/tsm/getLog', 
+  return this._postRequest('tsm/getLog', 
     {groupId: this.groupId, fromPoint: this.lastPoint})
   .then(function (res) {
     self.lastPoint = res.lastPoint
@@ -138,7 +178,7 @@ TSMClient.prototype.getUpdates = function () {
 }
 
 TSMClient.prototype.getLog = function (fromPoint) {
-  return this._postRequest('/tsm/getLog', 
+  return this._postRequest('tsm/getLog', 
     {groupId: this.groupId, fromPoint: fromPoint})
 }
 

@@ -16,6 +16,7 @@ var command_args = {}
 
 var url = args.url || 'http://localhost:4444/api/'
 var client = new Client(url)
+client.setCallbacks(console.log, console.log)
 
 function getState() {
   return Q.nfcall(fs.readFile, fname).then(function (data) {
