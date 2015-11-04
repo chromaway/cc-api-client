@@ -1,5 +1,5 @@
 var nopt = require('nopt')
-var bitcore = require('bitcore')
+var bitcore = require('bitcore-lib')
 var Q = require('q')
 var fs = require('fs')
 var helper = require('../helper')
@@ -14,7 +14,7 @@ var command = args.argv.remain.shift()
 var commands = {}
 var command_args = {}
 
-var url = args.url || 'http://localhost:4444/api/'
+var url = args.url || 'http://cc-api-tbtc.chromanode.net/api/'
 var client = new Client(url)
 client.setCallbacks(console.log, console.log)
 

@@ -1,4 +1,4 @@
-var bitcore = require('bitcore')
+var bitcore = require('bitcore-lib')
 var _ = require('lodash')
 var Q = require('q')
 

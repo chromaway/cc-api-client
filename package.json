@@ -8,11 +8,16 @@
   },
   "author": "",
   "license": "ISC",
+  "peerDependencies": {
+    "bitcore-lib": "^0.13.7"
+  },
   "dependencies": {
-    "bitcore": "^0.12.15",
     "lodash": "^3.10.1",
     "nopt": "^3.0.3",
     "q": "^1.4.1",
     "request": "^2.60.0"
+  },
+  "devDependencies": {
+    "bitcore-lib": "^0.13.7"
   }
 }
